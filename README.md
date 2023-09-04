@@ -14,7 +14,7 @@ In this work, we propose a data-efficient property predictor (__Geo-DEG__) by ut
 
 
 ### Install Prerequisites
-Install the dependencies for Geo-DDEG following:
+Install the dependencies for Geo-DEG following:
 ```bash
 conda create -n Geo_DEG python=3.6
 conda activate Geo_DEG
