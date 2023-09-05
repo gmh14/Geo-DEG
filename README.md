@@ -50,7 +50,8 @@ python main.py --dataset crow_smiles_and_Tg_celsius.txt --feat_arch GNN --motif 
 
 
 ## Acknowledgements
-The implementation of Geo-DEG is heavily based on [Data-Efficient Graph Grammar Learning for Molecular Generation](https://github.com/gmh14/data_efficient_grammar), partly based on [Molecular Optimization Using Molecular Hypergraph Grammar](https://github.com/ibm-research-tokyo/graph_grammar) and [Hierarchical Generation of Molecular Graphs using Structural Motifs](https://github.com/wengong-jin/hgraph2graph).
+The implementation of Geo-DEG is heavily based on [Data-Efficient Graph Grammar Learning for Molecular Generation](https://github.com/gmh14/data_efficient_grammar) and [graph-neural-pde
+](https://github.com/twitter-research/graph-neural-pde), partly based on [Molecular Optimization Using Molecular Hypergraph Grammar](https://github.com/ibm-research-tokyo/graph_grammar) and [Hierarchical Generation of Molecular Graphs using Structural Motifs](https://github.com/wengong-jin/hgraph2graph).
 
 
 ## Citation
