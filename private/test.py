@@ -15,9 +15,11 @@ with open('epoch_grammar_4_0.5804753739695949.pkl', 'rb') as f:
         mol_lhs = hg_to_mol_viz(lhs)
         sml_lhs = Chem.MolToSmiles(mol_lhs)
 
+        rhs.draw(file_path="./test_rhs")
         mol_rhs = hg_to_mol_viz(rhs)
         sml_rhs = Chem.MolToSmiles(mol_rhs)
         
         print("rule: ", sml_lhs, " -> ", sml_rhs)
+        # import pdb; pdb.set_trace()
     
 pdb.set_trace()

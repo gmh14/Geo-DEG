@@ -862,9 +862,8 @@ def hg_to_mol_viz(hg, verbose=False):
     for each_node in hg.nodes:
         if 'ext_id' in hg.node_attr(each_node):
             atom = Chem.Atom("*")
-        
-        atom_idx = mol.AddAtom(atom)
-        atom_dict[each_node] = atom_idx
+            atom_idx = mol.AddAtom(atom)
+            atom_dict[each_node] = atom_idx
 
     for each_node in hg.nodes:
         if 'ext_id' in hg.node_attr(each_node):
