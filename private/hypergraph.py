@@ -829,6 +829,77 @@ def hg_to_mol(hg, verbose=False):
         return mol
 
 
+def hg_to_mol_viz(hg, verbose=False):
+    """ convert a hypergraph into Mol object
+
+    Parameters
+    ----------
+    hg : Hypergraph
+
+    Returns
+    -------
+    mol : Chem.RWMol
+    """
+    mol = Chem.RWMol()
+    atom_dict = {}
+    bond_set = set()
+    for each_edge in hg.edges:
+        if not hg.edge_attr(each_edge)['terminal']:
+            atom = Chem.Atom(93) # use Ra for non-terminal nodes
+            # atom.SetNumExplicitHs(0)
+            # atom.SetFormalCharge(0)
+        else:
+            atom = Chem.Atom(hg.edge_attr(each_edge)['symbol'].symbol)
+            atom.SetNumExplicitHs(hg.edge_attr(each_edge)['symbol'].num_explicit_Hs)
+            atom.SetFormalCharge(hg.edge_attr(each_edge)['symbol'].formal_charge)
+            atom.SetChiralTag(
+                Chem.rdchem.ChiralType.values[
+                    hg.edge_attr(each_edge)['symbol'].chirality])
+        atom_idx = mol.AddAtom(atom)
+        atom_dict[each_edge] = atom_idx
+    
+    # add each ext_node as an atom
+    for each_node in hg.nodes:
+        if 'ext_id' in hg.node_attr(each_node):
+            atom = Chem.Atom("*")
+        
+        atom_idx = mol.AddAtom(atom)
+        atom_dict[each_node] = atom_idx
+
+    for each_node in hg.nodes:
+        if 'ext_id' in hg.node_attr(each_node):
+            edge_1 = list(hg.adj_edges(each_node).keys())
+            assert len(edge_1) == 1
+            edge_1 = edge_1[0]
+            edge_2 = each_node
+        else:
+            edge_1, edge_2 = list(hg.adj_edges(each_node).keys())
+        
+        if tuple([edge_1, edge_2]) not in bond_set:
+            if hg.node_attr(each_node)['symbol'].bond_type <= 3:
+                num_bond = hg.node_attr(each_node)['symbol'].bond_type
+            elif hg.node_attr(each_node)['symbol'].bond_type == 12:
+                num_bond = 1
+            else:
+                raise ValueError(f'too many bonds; {hg.node_attr(each_node)["bond_symbol"].bond_type}')
+            _ = mol.AddBond(atom_dict[edge_1],
+                            atom_dict[edge_2],
+                            order=Chem.rdchem.BondType.values[num_bond])
+            bond_idx = mol.GetBondBetweenAtoms(atom_dict[edge_1], atom_dict[edge_2]).GetIdx()
+
+            # stereo
+            mol.GetBondWithIdx(bond_idx).SetStereo(
+                Chem.rdchem.BondStereo.values[hg.node_attr(each_node)['symbol'].stereo])
+            bond_set.update(tuple([edge_1, edge_2]))
+            bond_set.update(tuple([edge_2, edge_1]))
+            
+    mol.UpdatePropertyCache()
+    mol = mol.GetMol()
+    if Chem.MolFromSmiles(Chem.MolToSmiles(mol)) is None:
+        raise RuntimeError('no valid molecule was obtained.')
+    return mol
+
+
 def atom_attr(atom, kekulize, terminal):
     """
     get atom's attributes
