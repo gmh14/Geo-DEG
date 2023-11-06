@@ -17,6 +17,7 @@ sys.path.append("../")
 from private import *
 from grammar_generation import *
 from agent import Agent
+# from retro_star_listener import lock
 
 
 def evaluate(grammar, opt, metrics=['diversity', 'syn']):

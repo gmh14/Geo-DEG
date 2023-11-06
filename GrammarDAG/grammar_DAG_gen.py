@@ -58,18 +58,19 @@ def data_processing(input_smiles, prop_values, GNN_model_path, motif, with_condi
 
     for n, smiles in enumerate(input_smiles):
         print("data processing {}/{}".format(n, len(input_smiles)))
+        
         prop_value = prop_values[n]
+        
         # Kekulized
         org_smiles = smiles
         try:
             smiles = get_smiles(get_mol(smiles))
         except:
             continue
+        
         mol = get_mol(smiles)
         input_mols.append(mol)
         
-        if n == -1:
-            import pdb; pdb.set_trace()
         if motif == 'edge':
             clusters, atom_cls = find_clusters(mol)
             for i,cls in enumerate(clusters):
@@ -84,9 +85,10 @@ def data_processing(input_smiles, prop_values, GNN_model_path, motif, with_condi
             clusters = [frag[1] for frag in fragments]
         else:
             raise ValueError("Invalid motif type")
-        if len(clusters) > 10:
-            print(len(clusters))
-            import pdb; pdb.set_trace()
+        
+        # if len(clusters) > 10:
+        #     print(len(clusters))
+        #     import pdb; pdb.set_trace()
         
         # Construct graphs
         subgraphs = []
@@ -97,26 +99,26 @@ def data_processing(input_smiles, prop_values, GNN_model_path, motif, with_condi
             subgraphs_idx_i.append(list(cluster))
             init_edge_flag += 1
         
-        if with_condition:
-            assert(type(prop_value) == list)
-            assert(len(prop_value) >= 1)
-            assert(len(prop_value[0]) == 3)
-            suffix = "-{}".format(prop_value[0][-1])
-        else:
-            suffix = "-{}".format(prop_value)
+        suffix = "-{:2f}".format(prop_value[0])
+        for cond in prop_value[1]:
+            suffix += "-{:2f}".format(cond)
 
         if MolKey(mol, suffix).sml in input_graphs_dict.keys():
             print("Duplicate mol", Chem.MolToSmiles(graph.mol))
             import pdb; pdb.set_trace()
             continue
+        
         init_subgraphs.append(subgraphs)
         subgraphs_idx.append(subgraphs_idx_i)
         graph = InputGraph(mol, smiles, org_smiles, prop_value, subgraphs, subgraphs_idx_i, GNN_model_path) #, mol_feature=crow_feature[n, :])
         input_graphs.append(graph)
+        
         print(MolKey(mol, suffix).sml)
+        
         input_graphs_dict[MolKey(graph.mol, suffix).sml] = graph
 
     assert len(input_graphs) == len(input_graphs_dict.values()), '{}, {}'.format(len(input_graphs), len(input_graphs_dict.values())) # make sure there is no duplicate
+    
     # Construct subgraph_set 
     subgraph_set = SubGraphSet(init_subgraphs, subgraphs_idx, input_graphs)
     return subgraph_set, input_graphs_dict
@@ -125,11 +127,12 @@ def data_processing(input_smiles, prop_values, GNN_model_path, motif, with_condi
 def grammar_generation(agent, input_graphs_dict, subgraph_set, grammar, mcmc_iter, sample_number):
     # Selected hyperedge (subgraph)
     plist = [*subgraph_set.map_to_input]
+    debug_all_p_star_list = []
 
     # Terminating condition
     if len(plist) == 0:
         # done_flag, new_input_graphs_dict, new_subgraph_set, new_grammar
-        return True, input_graphs_dict, subgraph_set, grammar
+        return True, input_graphs_dict, subgraph_set, grammar, debug_all_p_star_list
 
     # Update every InputGraph: remove every subgraph that equals to p_star, for those subgraphs that contain atom idx in p_star, replace the atom with p_star
     org_input_graphs_dict = deepcopy(input_graphs_dict)
@@ -159,6 +162,7 @@ def grammar_generation(agent, input_graphs_dict, subgraph_set, grammar, mcmc_ite
                 action_list, take_action = sample(agent, torch.vstack(all_final_features), mcmc_iter, sample_number)
                 if take_action:
                     break
+            # print("Sample time: ", time.time() - start)
         elif len(input_g.subgraphs) == 1:
             action_list = [1]
         else:
@@ -171,7 +175,6 @@ def grammar_generation(agent, input_graphs_dict, subgraph_set, grammar, mcmc_ite
         # update the JT nodes/edges
         input_g.update_JT(p_star_list) # TODO reset JT
 
-        start = time.time()
         # Generate rules # TODO faster way to implement this?
         add_grammar_count = 0
         for p_star in p_star_list:
@@ -184,6 +187,7 @@ def grammar_generation(agent, input_graphs_dict, subgraph_set, grammar, mcmc_ite
                 input_g.update_subgraph(subg_idx)
                 add_grammar_count += 1
 
+        debug_all_p_star_list.append(p_star_list)
         if len(p_star_list) != add_grammar_count:
             import pdb; pdb.set_trace()
                     
@@ -193,12 +197,12 @@ def grammar_generation(agent, input_graphs_dict, subgraph_set, grammar, mcmc_ite
     new_input_graphs_dict = deepcopy(input_graphs_dict)
     new_subgraph_set = deepcopy(subgraph_set)
 
-    # print("post process time: ", time.time() - start)
-    return False, new_input_graphs_dict, new_subgraph_set, new_grammar
+    return False, new_input_graphs_dict, new_subgraph_set, new_grammar, debug_all_p_star_list
 
 
 def DAG_MCMC_sampling(agent, all_input_graphs_dict, all_subgraph_set, all_grammar, sample_number):
     iter_num = 0
+    debug_all_p_star_list_iter = []
     start = time.time()
     
     for i, (key, input_g) in enumerate(all_input_graphs_dict.items()):
@@ -206,15 +210,23 @@ def DAG_MCMC_sampling(agent, all_input_graphs_dict, all_subgraph_set, all_gramma
         
     while(True):
         print("======MCMC iter{}======".format(iter_num))
-        done_flag, new_input_graphs_dict, new_subgraph_set, new_grammar = grammar_generation(agent, all_input_graphs_dict, all_subgraph_set, all_grammar, iter_num, sample_number)
+        done_flag, new_input_graphs_dict, new_subgraph_set, new_grammar, debug_all_p_star_list = grammar_generation(agent, all_input_graphs_dict, all_subgraph_set, all_grammar, iter_num, sample_number)
+        
         print("Graph contraction status: ", done_flag)
         if done_flag:
             break
+        
         all_input_graphs_dict = deepcopy(new_input_graphs_dict)
         all_subgraph_set = deepcopy(new_subgraph_set)
         all_grammar = deepcopy(new_grammar)
         iter_num += 1
+        debug_all_p_star_list_iter.append(debug_all_p_star_list)
         
+    for iter, p_star_list in enumerate(debug_all_p_star_list_iter):
+        print("iter: ", iter)
+        for p_star in p_star_list[0]:
+            print("p_star: ", p_star.subfrags)
+            
     print(list(new_input_graphs_dict.values())[0].JT_nodes)
     print("total MCMC time: ", time.time() - start)
     return iter_num, new_grammar, new_input_graphs_dict

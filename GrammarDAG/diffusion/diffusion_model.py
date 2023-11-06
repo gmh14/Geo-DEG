@@ -604,6 +604,103 @@ class DiffuseMPNGrammar(MessagePassing):
     def resetNFE(self):
         self.odeblock.odefunc.nfe = 0
 
+
+class DiffuseConditionGNNGrammar(MessagePassing):
+    def __init__(self, opt, device, with_diffusion=True, drop_ratio=0.0):
+        super(DiffuseConditionGNNGrammar, self).__init__()
+        num_layer = 5
+        emb_dim = 300
+        
+        if opt['with_condition']:
+            output_dim = opt['intermediate_feat_dim']
+        else:
+            output_dim = 1
+            
+        JK = 'last'
+        drop_ratio = drop_ratio
+        graph_pooling = 'mean'
+        gnn_type = 'gin'
+        self.opt = opt
+        self.T = opt['time']
+        self.device = device
+        self.with_diffusion = with_diffusion
+        self.opt = opt
+        self.f = LaplacianODEFunc
+        self.block = ConstantODEblock
+        self.time_tensor = torch.tensor([0, self.T]).to(device)
+        self.meta_mapping = nn.Linear(32, 300)
+
+        self.gnn = GNN(num_layer, emb_dim, JK, drop_ratio, gnn_type)
+        #Different kind of graph pooling
+        if graph_pooling == "sum":
+            self.pool = global_add_pool
+        elif graph_pooling == "mean":
+            self.pool = global_mean_pool
+        elif graph_pooling == "max":
+            self.pool = global_max_pool
+        elif graph_pooling == "attention":
+            if JK == "concat":
+                self.pool = GlobalAttention(gate_nn = torch.nn.Linear((self.num_layer + 1) * emb_dim, 1))
+            else:
+                self.pool = GlobalAttention(gate_nn = torch.nn.Linear(emb_dim, 1))
+        elif graph_pooling[:-1] == "set2set":
+            set2set_iter = int(graph_pooling[-1])
+            if JK == "concat":
+                self.pool = Set2Set((self.num_layer + 1) * emb_dim, set2set_iter)
+            else:
+                self.pool = Set2Set(emb_dim, set2set_iter)
+        else:
+            raise ValueError("Invalid graph pooling type.")
+
+        #For graph-level binary classification
+        if graph_pooling[:-1] == "set2set":
+            self.mult = 2
+        else:
+            self.mult = 1
+        
+        if JK == "concat":
+            self.graph_pred_linear = torch.nn.Linear(self.mult * (num_layer + 1) * emb_dim, output_dim)
+        else:
+            self.graph_pred_linear = torch.nn.Linear(self.mult * emb_dim, output_dim)
+        
+        self.fm = Meter()
+        self.bm = Meter()
+    
+    def init_diffusion(self, dataset):
+        self.num_features = dataset.data.num_features
+        self.num_nodes = dataset.data.num_nodes
+        self.odeblock = self.block(self.f, self.opt, dataset.data, dataset.train_edge_split_id, self.device, t=self.time_tensor).to(self.device)
+        self.meta_node_split_id = dataset.meta_node_split_id
+
+    def forward(self, x_meta, data_for_gnn):
+        x, x_edge_index, x_edge_attr, x_batch = data_for_gnn.x, data_for_gnn.edge_index, data_for_gnn.edge_attr, data_for_gnn.batch
+        
+        x = self.gnn(x, x_edge_index, x_edge_attr)
+        x = self.pool(x, x_batch)
+        x_meta = self.meta_mapping(x_meta)
+        
+        z = torch.cat([x_meta, x], dim=0)
+        
+        if self.with_diffusion:
+            self.odeblock.set_x0(z)
+            z = self.odeblock(z)
+            
+        z = self.graph_pred_linear(z)
+        out = z[self.meta_node_split_id:, :]
+        return out
+
+    def load_from_pretrain(self, path):
+        pt = torch.load(path)
+        missing_keys, unexpected_keys = self.load_state_dict(pt, strict=False)
+        assert(len(unexpected_keys) == 0)
+
+    def getNFE(self):
+        return self.odeblock.odefunc.nfe 
+
+    def resetNFE(self):
+        self.odeblock.odefunc.nfe = 0
+        
+        
 class DiffuseConditionMPNGrammar(MessagePassing):
     def __init__(self, opt, model_args, device, with_diffusion=True):
         super(DiffuseConditionMPNGrammar, self).__init__()
@@ -616,8 +713,11 @@ class DiffuseConditionMPNGrammar(MessagePassing):
         self.block = ConstantODEblock
         self.time_tensor = torch.tensor([0, self.T]).to(device)
         self.meta_mapping = nn.Linear(32, 300)
-
-        model_args.output_size = 16
+        
+        if opt['with_condition']:
+            model_args.output_size = opt['intermediate_feat_dim']
+        else:
+            model_args.output_size = 1
 
         self.mpn = MoleculeFeatModel(model_args)
         self.fnn = self.mpn.create_ffn(model_args)
@@ -637,15 +737,17 @@ class DiffuseConditionMPNGrammar(MessagePassing):
         batch = MoleculeDataset(data_for_gnn)
         mol_batch, features_batch, atom_descriptors_batch, atom_features_batch, bond_features_batch = \
             batch.batch_graph(), batch.features(), batch.atom_descriptors(), batch.atom_features(), batch.bond_features()
+            
         x = self.mpn(mol_batch, features_batch, atom_descriptors_batch, atom_features_batch, bond_features_batch)
         x_meta = self.meta_mapping(x_meta)
+        
         z = torch.cat([x_meta, x], dim=0)
+        
         if self.with_diffusion:
             self.odeblock.set_x0(z)
             z = self.odeblock(z)
+            
         z = self.fnn(z)
-        # if self.classification:
-        #     z = self.sigmoid(z)
         out = z[self.meta_node_split_id:, :]
         return out
 
@@ -664,16 +766,18 @@ class ConditionPostProcessing(nn.Module):
     def __init__(self, opt):
         super(ConditionPostProcessing, self).__init__()
         self.opt = opt
+        self.num_conditons = len(opt['condition_names'])
+        
         self.ffn = nn.Sequential(
-            nn.Linear(18, 32),
+            nn.Linear(self.num_conditons + self.opt['intermediate_feat_dim'], 32),
             nn.ReLU(),
             nn.Linear(32, 1),
         )
 
     def forward(self, mol_feat, condition):
         assert(mol_feat.shape[0] == condition.shape[0])
-        assert(condition.shape[1] == 2)
-        assert(mol_feat.shape[1] == 16)
+        assert(condition.shape[1] == self.num_conditons)
+        assert(mol_feat.shape[1] == self.opt['intermediate_feat_dim'])
         z = torch.cat([mol_feat, condition], dim=1)
         out = self.ffn(z)
         return out
