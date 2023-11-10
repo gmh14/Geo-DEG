@@ -1,5 +1,3 @@
-Necessary args: `--dataset`, `--target`, `--feat_arch`
-
 ```
 python main_new.py --dataset ../datasets/dataset_dummy.csv --target dynamic_viscosity --feat_arch MPN
 python main_new.py --dataset ../datasets/dataset_dummy.csv --target dynamic_viscosity --feat_arch GNN
