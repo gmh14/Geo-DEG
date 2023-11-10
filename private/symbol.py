@@ -77,13 +77,18 @@ class NTSymbol(object):
         bond type of each node"
     '''
 
-    def __init__(self, degree: int, is_aromatic: bool,
+    def __init__(self, degree: int, 
                  bond_symbol_list: list,
-                 for_ring=False):
+                 is_aromatic=False,
+                 for_ring=False,
+                 symbol="R",
+                 id_=0):
         self.degree = degree
         self.is_aromatic = is_aromatic
         self.for_ring = for_ring
         self.bond_symbol_list = self.sort_list(bond_symbol_list)
+        self.__symbol = symbol
+        self.id_ = id_
 
     def sort_list(self, bond_symbol_list):
         bond_symbol_type_list = [bond.bond_type for bond in bond_symbol_list]
@@ -95,9 +100,12 @@ class NTSymbol(object):
     def terminal(self) -> bool:
         return False
 
+    def type_id(self):
+        return self.id_
+    
     @property
     def symbol(self):
-        return f'R'
+        return self.__symbol
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, NTSymbol):
